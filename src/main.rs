@@ -21,6 +21,7 @@ fn print_help() {
     println!();
     println!("CONFIG:");
     println!("  Config file: ~/.config/nine-search/config.toml");
+    println!("  Set default values in [tavily] section. CLI flags override config.");
     println!("  Add your Tavily API key to the config file before use.");
 }
 
@@ -113,7 +114,11 @@ fn main() {
     }
 
     // Parse arguments
-    let params = parse_args();
+    let argv_params = parse_args();
+
+    // Load Tavily config defaults and merge with argv
+    let config_defaults = config::tavily_defaults_to_hashmap(&config.tavily);
+    let params = config::merge_params(&config_defaults, &argv_params);
 
     // Get provider from registry
     let registry = providers::build_registry();

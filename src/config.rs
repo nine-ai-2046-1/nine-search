@@ -1,4 +1,5 @@
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
@@ -11,12 +12,76 @@ default_provider = "tavily"
 id = "tavily"
 name = "Tavily Search"
 key = ""
+
+[tavily]
+# 🔍 搜尋深度：basic(快) / advanced(準) / fast / ultra-fast
+search_depth = "basic"
+# 📄 每個來源返回嘅內容片段數量（只限 advanced，範圍 1-3）
+chunks_per_source = 3
+# 🔢 最多返回幾多個搜尋結果（範圍 0-20）
+max_results = 5
+# 📂 搜尋類別：general(一般) / news(新聞) / finance(財經)
+topic = "general"
+# ⏰ 時間範圍：day / week / month / year（留空=全部）
+time_range = ""
+# 📅 開始日期（YYYY-MM-DD 格式，留空=唔限）
+start_date = ""
+# 📅 結束日期（YYYY-MM-DD 格式，留空=唔限）
+end_date = ""
+# 💡 要唔要返回 AI 生成嘅答案摘要
+include_answer = false
+# 📝 要唔要返回網頁原始內容
+include_raw_content = false
+# 🖼️ 要唔要返回相關圖片
+include_images = false
+# 🏷️ 要唔要返回圖片描述（需要 include_images=true）
+include_image_descriptions = false
+# 🔎 要唔要返回網站 favicon URL
+include_favicon = false
+# ✅ 只搜尋呢啲網站（例如：["github.com"]）
+include_domains = []
+# 🚫 唔搜尋呢啲網站
+exclude_domains = []
+# 🌍 指定國家提升搜尋結果排名（只限 general）
+country = ""
+# 🤖 自動調整搜尋參數（用 2 API credits）
+auto_parameters = false
+# 🎯 精確匹配搜尋（用引號包住嘅詞語）
+exact_match = false
+# 💰 要唔要返回 API 用量資訊
+include_usage = false
+# 🔒 過濾成人內容（Enterprise only）
+safe_search = false
 "#;
+
+#[derive(Debug, Deserialize, Default)]
+pub struct TavilyConfig {
+    pub search_depth: Option<String>,
+    pub chunks_per_source: Option<i64>,
+    pub max_results: Option<i64>,
+    pub topic: Option<String>,
+    pub time_range: Option<String>,
+    pub start_date: Option<String>,
+    pub end_date: Option<String>,
+    pub include_answer: Option<bool>,
+    pub include_raw_content: Option<bool>,
+    pub include_images: Option<bool>,
+    pub include_image_descriptions: Option<bool>,
+    pub include_favicon: Option<bool>,
+    pub include_domains: Option<Vec<String>>,
+    pub exclude_domains: Option<Vec<String>>,
+    pub country: Option<String>,
+    pub auto_parameters: Option<bool>,
+    pub exact_match: Option<bool>,
+    pub include_usage: Option<bool>,
+    pub safe_search: Option<bool>,
+}
 
 #[derive(Debug, Deserialize)]
 pub struct Config {
     pub default_provider: String,
     pub providers: Vec<ProviderConfig>,
+    pub tavily: Option<TavilyConfig>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -55,4 +120,40 @@ pub fn validate_api_key(config: &Config) -> Option<&ProviderConfig> {
         Some(p) if !p.key.is_empty() => Some(p),
         _ => None,
     }
+}
+
+pub fn tavily_defaults_to_hashmap(tavily: &Option<TavilyConfig>) -> HashMap<String, String> {
+    let mut params = HashMap::new();
+
+    if let Some(t) = tavily {
+        if let Some(v) = &t.search_depth { params.insert("search_depth".to_string(), v.clone()); }
+        if let Some(v) = t.chunks_per_source { params.insert("chunks_per_source".to_string(), v.to_string()); }
+        if let Some(v) = t.max_results { params.insert("max_results".to_string(), v.to_string()); }
+        if let Some(v) = &t.topic { params.insert("topic".to_string(), v.clone()); }
+        if let Some(v) = &t.time_range { if !v.is_empty() { params.insert("time_range".to_string(), v.clone()); } }
+        if let Some(v) = &t.start_date { if !v.is_empty() { params.insert("start_date".to_string(), v.clone()); } }
+        if let Some(v) = &t.end_date { if !v.is_empty() { params.insert("end_date".to_string(), v.clone()); } }
+        if let Some(v) = t.include_answer { params.insert("include_answer".to_string(), v.to_string()); }
+        if let Some(v) = t.include_raw_content { params.insert("include_raw_content".to_string(), v.to_string()); }
+        if let Some(v) = t.include_images { params.insert("include_images".to_string(), v.to_string()); }
+        if let Some(v) = t.include_image_descriptions { params.insert("include_image_descriptions".to_string(), v.to_string()); }
+        if let Some(v) = t.include_favicon { params.insert("include_favicon".to_string(), v.to_string()); }
+        if let Some(v) = &t.include_domains { if !v.is_empty() { params.insert("include_domains".to_string(), serde_json::to_string(v).unwrap_or_default()); } }
+        if let Some(v) = &t.exclude_domains { if !v.is_empty() { params.insert("exclude_domains".to_string(), serde_json::to_string(v).unwrap_or_default()); } }
+        if let Some(v) = &t.country { if !v.is_empty() { params.insert("country".to_string(), v.clone()); } }
+        if let Some(v) = t.auto_parameters { params.insert("auto_parameters".to_string(), v.to_string()); }
+        if let Some(v) = t.exact_match { params.insert("exact_match".to_string(), v.to_string()); }
+        if let Some(v) = t.include_usage { params.insert("include_usage".to_string(), v.to_string()); }
+        if let Some(v) = t.safe_search { params.insert("safe_search".to_string(), v.to_string()); }
+    }
+
+    params
+}
+
+pub fn merge_params(defaults: &HashMap<String, String>, argv: &HashMap<String, String>) -> HashMap<String, String> {
+    let mut merged = defaults.clone();
+    for (k, v) in argv {
+        merged.insert(k.clone(), v.clone());
+    }
+    merged
 }
