@@ -12,17 +12,14 @@ fn print_help() {
     println!();
     println!("OPTIONS:");
     println!("  --query <string>              Search query (required)");
-    println!("  --search_depth <string>       Search depth: basic, advanced, fast, ultra-fast");
-    println!("  --max_results <int>           Maximum results (0-20)");
-    println!("  --topic <string>              Topic: general, news, finance");
-    println!("  --include_images <bool>       Include images in response");
-    println!("  --include_answer <bool>       Include LLM-generated answer");
     println!("  --help, -h                    Print this help message");
+    println!();
+    println!("DEFAULT PROVIDER: markdown-search (free, no API key needed)");
     println!();
     println!("CONFIG:");
     println!("  Config file: ~/.config/nine-search/config.toml");
-    println!("  Set default values in [tavily] section. CLI flags override config.");
-    println!("  Add your Tavily API key to the config file before use.");
+    println!("  markdown-search: Set defaults in [markdown-search] section.");
+    println!("  tavily: Add API key and set defaults in [tavily] section.");
 }
 
 fn parse_args() -> HashMap<String, String> {
@@ -93,16 +90,6 @@ fn main() {
     // Load or create config
     let config = config::load_or_create();
 
-    // Validate API key
-    let provider_config = match config::validate_api_key(&config) {
-        Some(p) => p,
-        None => {
-            eprintln!("Error: API key not configured for provider '{}'", config.default_provider);
-            eprintln!("Please edit ~/.config/nine-search/config.toml and add your API key.");
-            process::exit(1);
-        }
-    };
-
     // Check if curl is available
     let curl_check = process::Command::new("curl")
         .arg("--version")
@@ -116,10 +103,6 @@ fn main() {
     // Parse arguments
     let argv_params = parse_args();
 
-    // Load Tavily config defaults and merge with argv
-    let config_defaults = config::tavily_defaults_to_hashmap(&config.tavily);
-    let params = config::merge_params(&config_defaults, &argv_params);
-
     // Get provider from registry
     let registry = providers::build_registry();
     let provider = match registry.get(&config.default_provider) {
@@ -130,6 +113,30 @@ fn main() {
             process::exit(1);
         }
     };
+
+    // Validate API key only if provider needs it
+    let provider_config = if config::provider_needs_api_key(&config.default_provider) {
+        match config::validate_api_key(&config) {
+            Some(p) => Some(p),
+            None => {
+                eprintln!("Error: API key not configured for provider '{}'", config.default_provider);
+                eprintln!("Please edit ~/.config/nine-search/config.toml and add your API key.");
+                process::exit(1);
+            }
+        }
+    } else {
+        None
+    };
+
+    // Load config defaults based on provider
+    let config_defaults = match config.default_provider.as_str() {
+        "markdown-search" => config::markdown_search_defaults_to_hashmap(&config.markdown_search),
+        "tavily" => config::tavily_defaults_to_hashmap(&config.tavily),
+        _ => HashMap::new(),
+    };
+
+    // Merge config defaults with argv (argv wins)
+    let params = config::merge_params(&config_defaults, &argv_params);
 
     // Validate params against provider schema
     let valid_params = provider.valid_params();
@@ -149,7 +156,8 @@ fn main() {
     }
 
     // Build curl command
-    let curl_args = provider.build_curl_args(&params, &provider_config.key);
+    let api_key = provider_config.map(|p| p.key.as_str()).unwrap_or("");
+    let curl_args = provider.build_curl_args(&params, api_key);
 
     // Execute curl
     let output = process::Command::new("curl")
@@ -157,6 +165,7 @@ fn main() {
         .output()
         .expect("Failed to execute curl");
 
+    // Handle HTTP errors
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         eprintln!("Error: curl failed with status: {}", output.status);
@@ -164,8 +173,25 @@ fn main() {
         process::exit(1);
     }
 
-    // Parse and pretty-print response
+    // Check for HTTP error codes in response
     let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Try to detect HTTP errors from curl output
+    // curl -s doesn't output HTTP headers, so we check the response body
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(&stdout) {
+        // Check if it's an error response
+        if let Some(success) = value.get("success") {
+            if success == false {
+                let error_msg = value.get("error")
+                    .and_then(|e| e.as_str())
+                    .unwrap_or("Unknown error");
+                eprintln!("Error: {}", error_msg);
+                process::exit(1);
+            }
+        }
+    }
+
+    // Parse and pretty-print response
     match provider.parse_response(&stdout) {
         Ok(value) => {
             println!("{}", serde_json::to_string_pretty(&value).unwrap());

@@ -4,13 +4,17 @@ use std::fs;
 use std::path::PathBuf;
 
 const DEFAULT_CONFIG: &str = r#"# nine-search configuration
-# Get your API key at https://tavily.com
 
-default_provider = "tavily"
+default_provider = "markdown-search"
 
 [[providers]]
 id = "tavily"
 name = "Tavily Search"
+key = ""
+
+[[providers]]
+id = "markdown-search"
+name = "Markdown Search"
 key = ""
 
 [tavily]
@@ -52,6 +56,20 @@ exact_match = false
 include_usage = false
 # 🔒 過濾成人內容（Enterprise only）
 safe_search = false
+
+# 🆕 免費搜尋引擎，返回完整 Markdown 內容（適合 RAG）
+# ⚠️ Rate limit: 30次/分鐘, 500次/日 (per IP)
+[markdown-search]
+# 🔢 搜尋結果數量 (1-5)
+n = 5
+# 🌍 搜尋地區 (us, uk, de, jp, hk...)
+gl = "hk"
+# 🗣️ 搜尋語言 (en, zh, ja...)
+hl = "zh"
+# 📄 回傳格式 (固定 json，唔好改)
+format = "json"
+# 🖼️ 要唔要保留圖片 Markdown
+retain_images = true
 "#;
 
 #[derive(Debug, Deserialize, Default)]
@@ -77,11 +95,21 @@ pub struct TavilyConfig {
     pub safe_search: Option<bool>,
 }
 
+#[derive(Debug, Deserialize, Default)]
+pub struct MarkdownSearchConfig {
+    pub n: Option<i64>,
+    pub gl: Option<String>,
+    pub hl: Option<String>,
+    pub format: Option<String>,
+    pub retain_images: Option<bool>,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct Config {
     pub default_provider: String,
     pub providers: Vec<ProviderConfig>,
     pub tavily: Option<TavilyConfig>,
+    pub markdown_search: Option<MarkdownSearchConfig>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -156,4 +184,22 @@ pub fn merge_params(defaults: &HashMap<String, String>, argv: &HashMap<String, S
         merged.insert(k.clone(), v.clone());
     }
     merged
+}
+
+pub fn markdown_search_defaults_to_hashmap(markdown_search: &Option<MarkdownSearchConfig>) -> HashMap<String, String> {
+    let mut params = HashMap::new();
+
+    if let Some(m) = markdown_search {
+        if let Some(v) = m.n { params.insert("n".to_string(), v.to_string()); }
+        if let Some(v) = &m.gl { params.insert("gl".to_string(), v.clone()); }
+        if let Some(v) = &m.hl { params.insert("hl".to_string(), v.clone()); }
+        if let Some(v) = &m.format { params.insert("format".to_string(), v.clone()); }
+        if let Some(v) = m.retain_images { params.insert("retain_images".to_string(), v.to_string()); }
+    }
+
+    params
+}
+
+pub fn provider_needs_api_key(provider_id: &str) -> bool {
+    provider_id != "markdown-search"
 }

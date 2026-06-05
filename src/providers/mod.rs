@@ -1,4 +1,5 @@
 pub mod tavily;
+pub mod markdown_search;
 
 use std::collections::HashMap;
 
@@ -29,5 +30,6 @@ pub trait Provider {
 pub fn build_registry() -> HashMap<String, Box<dyn Provider>> {
     let mut registry: HashMap<String, Box<dyn Provider>> = HashMap::new();
     registry.insert("tavily".to_string(), Box::new(crate::providers::tavily::TavilyProvider));
+    registry.insert("markdown-search".to_string(), Box::new(crate::providers::markdown_search::MarkdownSearchProvider));
     registry
 }
